@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "SteamUnlocked Proxy Redirect",
+  "version": "1.0",
+  "description": "Redirige les accès SteamUnlocked via le proxy pour contourner le firewall",
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking"
+  ],
+  "host_permissions": [
+    "*://steamunlocked.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
