@@ -5,55 +5,50 @@ from urllib.parse import urljoin, quote
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def proxy():
-    base_url = request.args.get('url') or request.form.get('url')
-    if not base_url or not base_url.startswith('http'):
-        return "Invalid or missing URL parameter", 400
+    target_url = request.args.get('url')
+
+    if not target_url:
+        return "Error: Missing 'url' parameter", 400
 
     try:
-        resp = requests.get(base_url, headers={"User-Agent": "Mozilla/5.0"})
-        content_type = resp.headers.get('Content-Type', '')
-
-        if 'text/html' in content_type:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-
-            # Réécriture des liens dans <a>, <link>, <script>, <img>
-            for tag in soup.find_all(['a', 'link', 'script', 'img']):
-                attr = 'href' if tag.name in ['a', 'link'] else 'src'
-                if tag.has_attr(attr):
-                    original = tag[attr]
-                    absolute = urljoin(base_url, original)
-                    tag[attr] = f"/?url={quote(absolute)}"
-
-            # Gestion des images lazy-load (data-src)
-            for img in soup.find_all('img'):
-                if img.has_attr('data-src'):
-                    absolute = urljoin(base_url, img['data-src'])
-                    img['src'] = f"/?url={quote(absolute)}"
-
-            # Réécriture des formulaires (ex: recherche)
-            for form in soup.find_all('form'):
-                action = form.get('action', '')
-                method = form.get('method', 'get').lower()
-                absolute = urljoin(base_url, action)
-
-                if method == 'get':
-                    form['action'] = '/'
-                    hidden_input = soup.new_tag('input', attrs={'type': 'hidden', 'name': 'url', 'value': absolute})
-                    form.insert(0, hidden_input)
-
-            return str(soup)
-
-        else:
-            return Response(
-                resp.content,
-                status=resp.status_code,
-                content_type=resp.headers.get('Content-Type')
-            )
-
+        resp = requests.get(target_url, headers={'User-Agent': request.headers.get('User-Agent', '')})
     except Exception as e:
-        return f"Error fetching URL: {str(e)}", 500
+        return f"Error fetching URL: {e}", 500
+
+    content_type = resp.headers.get('Content-Type', '')
+
+    # Si c'est HTML, on modifie les liens
+    if 'text/html' in content_type:
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        base_url = target_url
+
+        for tag in soup.find_all(['a', 'link', 'script', 'img', 'iframe']):
+            for attr in ['href', 'src']:
+                if tag.has_attr(attr):
+                    orig = tag[attr]
+                    if orig.startswith('http') or orig.startswith('/'):
+                        absolute = urljoin(base_url, orig)
+                        tag[attr] = f"/?url={quote(absolute)}"
+
+        # Traiter aussi les attributs data-*
+        for tag in soup.find_all():
+            for attr in tag.attrs:
+                if attr.startswith('data-') and isinstance(tag[attr], str):
+                    val = tag[attr]
+                    if val.startswith('http') or val.startswith('/'):
+                        absolute = urljoin(base_url, val)
+                        tag[attr] = f"/?url={quote(absolute)}"
+
+        return Response(str(soup), content_type='text/html')
+
+    # Si c'est autre chose (images, CSS, JS...), on transmet brut
+    return Response(
+        resp.content,
+        status=resp.status_code,
+        content_type=resp.headers.get('Content-Type')
+    )
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)
